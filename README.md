@@ -50,6 +50,9 @@ Athena can communicate over discord channels.
 
 Note: Due to Discords API rate limiting, the number of agents that can be executed at once using a specific workspace/token combination is limited. A lower sleeptime supports more agents.
 
+### Telegram
+Athena can use private Telegram bot-to-bot messages when paired with the [`telegram`](https://github.com/DavidCarliez/telegram) Mythic C2 profile. Each concurrently running payload requires a dedicated agent bot token, and Bot-to-Bot Communication Mode must be enabled for both the agent and controller bots.
+
 ### SMB
 Athena supports SMB communications for internal comms over named pipes.
 
