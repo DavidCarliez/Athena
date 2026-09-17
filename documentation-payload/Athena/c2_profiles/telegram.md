@@ -13,6 +13,8 @@ Each running payload requires a dedicated agent bot token. The Telegram controll
 The transport splits encrypted Mythic messages into Telegram-safe chunks. Do not reuse one agent bot token across concurrent payload instances because their `getUpdates` calls share one update queue.
 
 Outbound responses remain pending until the controller acknowledges the matching request. This prevents a transient Telegram or controller error from discarding task output.
+Mythic can push tasking between agent requests. The controller holds that tasking until the next agent exchange, and Athena also accepts explicitly pushed tasking envelopes.
+
 
 ## Required parameters
 
@@ -22,6 +24,9 @@ Outbound responses remain pending until the controller acknowledges the matching
 - `message_checks`: maximum polls for a controller response
 - `time_between_checks`: long-poll timeout in seconds
 - `AESPSK`: Athena message encryption
+
+For a Windows single-file build, Mythic stores the executable directly. The payload shown in the Payloads view is therefore a downloadable `.exe`, not a ZIP archive with an `.exe` filename.
+
 
 The profile also supports Athena sleep and jitter, an expiration date, a custom User-Agent, and HTTP proxy settings.
 

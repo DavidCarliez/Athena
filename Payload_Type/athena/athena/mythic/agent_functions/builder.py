@@ -376,12 +376,13 @@ class athena(PayloadType):
     #def bundleApp(self, output_path):
 
 
-    async def returnSuccess(self, resp: BuildResponse, build_msg, agent_build_path, stdout) -> BuildResponse:
+    async def returnSuccess(self, resp: BuildResponse, build_msg, agent_build_path, stdout, payload_path=None) -> BuildResponse:
         resp.status = BuildStatus.Success
         resp.build_message = build_msg
-        resp.payload = open(f"{agent_build_path.name}/output.zip", 'rb').read()
+        artifact_path = payload_path or f"{agent_build_path.name}/output.zip"
+        resp.payload = open(artifact_path, 'rb').read()
         resp.set_build_stdout(stdout)
-        return resp     
+        return resp
     
     async def returnFailure(self, resp: BuildResponse, err_msg, build_msg) -> BuildResponse:
         resp.status = BuildStatus.Error
@@ -633,16 +634,36 @@ class athena(PayloadType):
                 mac_bundler.create_app_bundle("Agent", os.path.join(output_path, "Agent"), output_path)
                 os.remove(os.path.join(output_path, "Agent"))
 
-            shutil.make_archive(f"{agent_build_path.name}/output", "zip", f"{output_path}")  
+            if self.get_parameter("single-file") and self.get_parameter("output-type") in ["binary", "windows service"]:
+                if self.selected_os.lower() == "windows":
+                    executable_name = "Athena.exe" if self.get_parameter("configuration") != "Debug" else "{}.exe".format(self.get_parameter("assemblyname"))
+                else:
+                    executable_name = self.get_parameter("assemblyname")
+                executable_path = os.path.join(output_path, executable_name)
+                await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
+                        PayloadUUID=self.uuid,
+                        StepName="Zip",
+                        StepStdout="Single-file payload returned without an archive",
+                        StepSuccess=True
+                    ))
+                return await self.returnSuccess(
+                    resp,
+                    "File built successfully!",
+                    agent_build_path,
+                    str(build_stdout),
+                    executable_path
+                )
+
+            shutil.make_archive(f"{agent_build_path.name}/output", "zip", f"{output_path}")
 
             await SendMythicRPCPayloadUpdatebuildStep(MythicRPCPayloadUpdateBuildStepMessage(
                     PayloadUUID=self.uuid,
                     StepName="Zip",
                     StepStdout="Successfully zipped payload",
                     StepSuccess=True
-                ))   
-            
-            return await self.returnSuccess(resp, "File built succesfully!", agent_build_path, str(build_stdout))
+                ))
+
+            return await self.returnSuccess(resp, "File built successfully!", agent_build_path, str(build_stdout))
         except:
             return await self.returnFailure(resp, str(traceback.format_exc()), "Exception in builder.py")
     
