@@ -12,6 +12,8 @@ Each running payload requires a dedicated agent bot token. The Telegram controll
 
 The transport splits encrypted Mythic messages into Telegram-safe chunks. Do not reuse one agent bot token across concurrent payload instances because their `getUpdates` calls share one update queue.
 
+Outbound responses remain pending until the controller acknowledges the matching request. This prevents a transient Telegram or controller error from discarding task output.
+
 ## Required parameters
 
 - `bot_token`: dedicated agent bot token
